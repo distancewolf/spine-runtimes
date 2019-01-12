@@ -29,6 +29,7 @@
  *****************************************************************************/
  
 package spine.starling {
+	import starling.styles.MeshStyle;
 	import spine.attachments.ClippingAttachment;
 	import spine.SkeletonClipping;
 	import spine.Bone;
@@ -59,9 +60,9 @@ package spine.starling {
 		static private var _tempMatrix : Matrix = new Matrix();
 		static private var _tempVertices : Vector.<Number> = new Vector.<Number>(8);
 		static internal var blendModes : Vector.<String> = new <String>[BlendMode.NORMAL, BlendMode.ADD, BlendMode.MULTIPLY, BlendMode.SCREEN];
-		private var _skeleton : Skeleton;
-		public var batchable : Boolean = true;
+		private var _skeleton : Skeleton;		
 		private var _smoothing : String = "bilinear";
+		private var _twoColorTint : Boolean = false;
 		private static var clipper: SkeletonClipping = new SkeletonClipping();
 		private static var QUAD_INDICES : Vector.<uint> = new <uint>[0, 1, 2, 2, 3, 0];
 		
@@ -98,6 +99,7 @@ package spine.starling {
 			for (var i : int = 0, n : int = drawOrder.length; i < n; ++i) {
 				var worldVertices : Vector.<Number> = _tempVertices;
 				var slot : Slot = drawOrder[i];
+
 				if (slot.attachment is RegionAttachment) {
 					var region : RegionAttachment = slot.attachment as RegionAttachment;
 					verticesLength = 4 * 2;
@@ -112,7 +114,7 @@ package spine.starling {
 							region.rendererObject = mesh = new SkeletonMesh(Image(region.rendererObject).texture);
 						if (region.rendererObject is AtlasRegion)
 							region.rendererObject = mesh = new SkeletonMesh(Image(AtlasRegion(region.rendererObject).rendererObject).texture);						
-						mesh.setStyle(new TwoColorMeshStyle());					
+						if (_twoColorTint) mesh.setStyle(new TwoColorMeshStyle());					
 						indexData = mesh.getIndexData();
 						for (ii = 0; ii < indices.length; ii++)
 							indexData.setIndex(ii, indices[ii]);
@@ -136,7 +138,7 @@ package spine.starling {
 							meshAttachment.rendererObject = mesh = new SkeletonMesh(Image(meshAttachment.rendererObject).texture);
 						if (meshAttachment.rendererObject is AtlasRegion)
 							meshAttachment.rendererObject = mesh = new SkeletonMesh(Image(AtlasRegion(meshAttachment.rendererObject).rendererObject).texture);						
-						mesh.setStyle(new TwoColorMeshStyle());
+						if (_twoColorTint) mesh.setStyle(new TwoColorMeshStyle());
 						
 						indexData = mesh.getIndexData();
 						indicesLength = meshAttachment.triangles.length;
@@ -146,7 +148,7 @@ package spine.starling {
 						indexData.numIndices = indicesLength;
 						indexData.trim();
 					}
-					indexData = mesh.getIndexData();				
+					indexData = mesh.getIndexData();
 					attachmentColor = meshAttachment.color;
 					uvs = meshAttachment.uvs;					
 				} else if (slot.attachment is ClippingAttachment) {
@@ -158,6 +160,10 @@ package spine.starling {
 				}
 				
 				a = slot.color.a * attachmentColor.a;
+				if (a == 0) {
+				   clipper.clipEndWithSlot(slot);
+				   continue;
+				}
 				rgb = Color.rgb(r * slot.color.r * attachmentColor.r, g * slot.color.g * attachmentColor.g, b * slot.color.b * attachmentColor.b);
 				if (slot.darkColor == null) dark = Color.rgb(0, 0, 0);
 				else dark = Color.rgb(slot.darkColor.r * 255, slot.darkColor.g * 255, slot.darkColor.b * 255);	
@@ -165,17 +171,22 @@ package spine.starling {
 				if (clipper.isClipping()) {
 					clipper.clipTriangles(worldVertices, indices, indices.length, uvs);
 					
+					// Need to create a new mesh here, see https://github.com/EsotericSoftware/spine-runtimes/issues/1125					
+					mesh = new SkeletonMesh(mesh.texture);
+					if (_twoColorTint) mesh.setStyle(new TwoColorMeshStyle());	
+					indexData = mesh.getIndexData();
+
 					verticesCount = clipper.clippedVertices.length >> 1;
 					worldVertices = clipper.clippedVertices;
 					uvs = clipper.clippedUvs;					
 					
 					indices = clipper.clippedTriangles;
 					indicesLength = indices.length;
+					indexData.numIndices = indicesLength;
+					indexData.trim();
 					for (ii = 0; ii < indicesLength; ii++) {
 						indexData.setIndex(ii, indices[ii]);
 					}
-					indexData.numIndices = indicesLength;
-					indexData.trim();
 				}
 
 				vertexData = mesh.getVertexData();
@@ -198,20 +209,22 @@ package spine.starling {
 						tempVertex.dark.setFromColor(tempDark);
 						vertexEffect.transform(tempVertex);
 						vertexData.colorize("color", Color.rgb(tempVertex.light.r * 255, tempVertex.light.g * 255, tempVertex.light.b * 255), tempVertex.light.a, ii, 1);
-						vertexData.colorize("color2", Color.rgb(tempVertex.dark.r * 255, tempVertex.dark.g * 255, tempVertex.dark.b * 255), a, ii, 1);						
+						if (_twoColorTint) vertexData.colorize("color2", Color.rgb(tempVertex.dark.r * 255, tempVertex.dark.g * 255, tempVertex.dark.b * 255), a, ii, 1);						
 						mesh.setVertexPosition(ii, tempVertex.x, tempVertex.y);
 						mesh.setTexCoords(ii, tempVertex.u, tempVertex.v);
 					}
 				} else {
 					vertexData.colorize("color", rgb, a);
-					vertexData.colorize("color2", dark);
+					if (_twoColorTint) vertexData.colorize("color2", dark);
 					for (ii = 0, iii = 0; ii < verticesCount; ii++, iii += 2) {
 						mesh.setVertexPosition(ii, worldVertices[iii], worldVertices[iii + 1]);
 						mesh.setTexCoords(ii, uvs[iii], uvs[iii + 1]);
 					}				
 				}
-				painter.state.blendMode = blendModes[slot.data.blendMode.ordinal];				
-				painter.batchMesh(mesh);
+				if (indexData.numIndices > 0 && vertexData.numVertices > 0) {
+					painter.state.blendMode = blendModes[slot.data.blendMode.ordinal];
+					painter.batchMesh(mesh);
+				}
 				
 				clipper.clipEndWithSlot(slot);
 			}
@@ -222,6 +235,8 @@ package spine.starling {
 		}
 
 		override public function hitTest(localPoint : Point) : DisplayObject {
+			if (!this.visible || !this.touchable) return null;
+			
 			var minX : Number = Number.MAX_VALUE, minY : Number = Number.MAX_VALUE;
 			var maxX : Number = -Number.MAX_VALUE, maxY : Number = -Number.MAX_VALUE;
 			var slots : Vector.<Slot> = skeleton.slots;
@@ -302,6 +317,14 @@ package spine.starling {
 
 		public function set smoothing(smoothing : String) : void {
 			_smoothing = smoothing;
+		}
+		
+		public function get twoColorTint() : Boolean {
+			return _twoColorTint;
+		}
+		
+		public function set twoColorTint(tint : Boolean) : void {
+			_twoColorTint = tint;
 		}
 	}
 }

@@ -6,8 +6,7 @@ public class SpineUE4 : ModuleRules
 {
 	public SpineUE4(ReadOnlyTargetRules Target) : base(Target)
 	{
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "SpinePlugin", "RuntimeMeshComponent" });
-		PublicIncludePaths.AddRange(new string[] { "SpinePlugin/Public", "SpinePlugin/Classes" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "SpinePlugin", "ProceduralMeshComponent" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

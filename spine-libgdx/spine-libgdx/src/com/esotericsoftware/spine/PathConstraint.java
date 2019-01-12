@@ -30,7 +30,6 @@
 
 package com.esotericsoftware.spine;
 
-
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.FloatArray;
 import com.esotericsoftware.spine.PathConstraintData.PositionMode;
@@ -46,6 +45,7 @@ import com.esotericsoftware.spine.utils.SpineUtils;
  * See <a href="http://esotericsoftware.com/spine-path-constraints">Path constraints</a> in the Spine User Guide. */
 public class PathConstraint implements Constraint {
 	static private final int NONE = -1, BEFORE = -2, AFTER = -3;
+	static private final float epsilon = 0.00001f;
 
 	final PathConstraintData data;
 	final Array<Bone> bones;
@@ -100,24 +100,35 @@ public class PathConstraint implements Constraint {
 		if (!translate && !rotate) return;
 
 		PathConstraintData data = this.data;
-		SpacingMode spacingMode = data.spacingMode;
-		boolean lengthSpacing = spacingMode == SpacingMode.length;
+		boolean percentSpacing = data.spacingMode == SpacingMode.percent;
 		RotateMode rotateMode = data.rotateMode;
 		boolean tangents = rotateMode == RotateMode.tangent, scale = rotateMode == RotateMode.chainScale;
 		int boneCount = this.bones.size, spacesCount = tangents ? boneCount : boneCount + 1;
 		Object[] bones = this.bones.items;
 		float[] spaces = this.spaces.setSize(spacesCount), lengths = null;
 		float spacing = this.spacing;
-		if (scale || lengthSpacing) {
+		if (scale || !percentSpacing) {
 			if (scale) lengths = this.lengths.setSize(boneCount);
+			boolean lengthSpacing = data.spacingMode == SpacingMode.length;
 			for (int i = 0, n = spacesCount - 1; i < n;) {
 				Bone bone = (Bone)bones[i];
 				float setupLength = bone.data.length;
-				if (setupLength == 0) setupLength = 0.000000001f;
-				float x = setupLength * bone.a, y = setupLength * bone.c;
-				float length = (float)Math.sqrt(x * x + y * y);
-				if (scale) lengths[i] = length;				
-				spaces[++i] = (lengthSpacing ? setupLength + spacing : spacing) * length / setupLength;
+				if (setupLength < epsilon) {
+					if (scale) lengths[i] = 0;
+					spaces[++i] = 0;
+				} else if (percentSpacing) {
+					if (scale) {
+						float x = setupLength * bone.a, y = setupLength * bone.c;
+						float length = (float)Math.sqrt(x * x + y * y);
+						lengths[i] = length;
+					}
+					spaces[++i] = spacing;
+				} else {
+					float x = setupLength * bone.a, y = setupLength * bone.c;
+					float length = (float)Math.sqrt(x * x + y * y);
+					if (scale) lengths[i] = length;
+					spaces[++i] = (lengthSpacing ? setupLength + spacing : spacing) * length / setupLength;
+				}
 			}
 		} else {
 			for (int i = 1; i < spacesCount; i++)
@@ -125,7 +136,7 @@ public class PathConstraint implements Constraint {
 		}
 
 		float[] positions = computeWorldPositions((PathAttachment)attachment, spacesCount, tangents,
-			data.positionMode == PositionMode.percent, spacingMode == SpacingMode.percent);
+			data.positionMode == PositionMode.percent, percentSpacing);
 		float boneX = positions[0], boneY = positions[1], offsetRotation = data.offsetRotation;
 		boolean tip;
 		if (offsetRotation == 0)
@@ -142,7 +153,7 @@ public class PathConstraint implements Constraint {
 			float x = positions[p], y = positions[p + 1], dx = x - boneX, dy = y - boneY;
 			if (scale) {
 				float length = lengths[i];
-				if (length != 0) {
+				if (length >= epsilon) {
 					float s = ((float)Math.sqrt(dx * dx + dy * dy) / length - 1) * rotateMix + 1;
 					bone.a *= s;
 					bone.c *= s;
@@ -154,7 +165,7 @@ public class PathConstraint implements Constraint {
 				float a = bone.a, b = bone.b, c = bone.c, d = bone.d, r, cos, sin;
 				if (tangents)
 					r = positions[p - 1];
-				else if (spaces[i + 1] == 0)
+				else if (spaces[i + 1] < epsilon)
 					r = positions[p + 2];
 				else
 					r = (float)Math.atan2(dy, dx);
@@ -197,7 +208,7 @@ public class PathConstraint implements Constraint {
 			float pathLength = lengths[curveCount];
 			if (percentPosition) position *= pathLength;
 			if (percentSpacing) {
-				for (int i = 0; i < spacesCount; i++)
+				for (int i = 1; i < spacesCount; i++)
 					spaces[i] *= pathLength;
 			}
 			world = this.world.setSize(8);
@@ -247,7 +258,7 @@ public class PathConstraint implements Constraint {
 						path.computeWorldVertices(target, curve * 6 + 2, 8, world, 0, 2);
 				}
 				addCurvePosition(p, world[0], world[1], world[2], world[3], world[4], world[5], world[6], world[7], out, o,
-					tangents || (i > 0 && space == 0));
+					tangents || (i > 0 && space < epsilon));
 			}
 			return out;
 		}
@@ -303,9 +314,12 @@ public class PathConstraint implements Constraint {
 			x1 = x2;
 			y1 = y2;
 		}
-		if (percentPosition) position *= pathLength;
+		if (percentPosition)
+			position *= pathLength;
+		else
+			position *= pathLength / path.getLengths()[curveCount - 1];
 		if (percentSpacing) {
-			for (int i = 0; i < spacesCount; i++)
+			for (int i = 1; i < spacesCount; i++)
 				spaces[i] *= pathLength;
 		}
 
@@ -395,7 +409,7 @@ public class PathConstraint implements Constraint {
 				}
 				break;
 			}
-			addCurvePosition(p * 0.1f, x1, y1, cx1, cy1, cx2, cy2, x2, y2, out, o, tangents || (i > 0 && space == 0));
+			addCurvePosition(p * 0.1f, x1, y1, cx1, cy1, cx2, cy2, x2, y2, out, o, tangents || (i > 0 && space < epsilon));
 		}
 		return out;
 	}
@@ -416,13 +430,23 @@ public class PathConstraint implements Constraint {
 
 	private void addCurvePosition (float p, float x1, float y1, float cx1, float cy1, float cx2, float cy2, float x2, float y2,
 		float[] out, int o, boolean tangents) {
-		if (p == 0 || Float.isNaN(p)) p = 0.0001f;
+		if (p < epsilon || Float.isNaN(p)) {
+			out[o] = x1;
+			out[o + 1] = y1;
+			out[o + 2] = (float)Math.atan2(cy1 - y1, cx1 - x1);
+			return;
+		}
 		float tt = p * p, ttt = tt * p, u = 1 - p, uu = u * u, uuu = uu * u;
 		float ut = u * p, ut3 = ut * 3, uut3 = u * ut3, utt3 = ut3 * p;
 		float x = x1 * uuu + cx1 * uut3 + cx2 * utt3 + x2 * ttt, y = y1 * uuu + cy1 * uut3 + cy2 * utt3 + y2 * ttt;
 		out[o] = x;
 		out[o + 1] = y;
-		if (tangents) out[o + 2] = (float)Math.atan2(y - (y1 * uu + cy1 * ut * 2 + cy2 * tt), x - (x1 * uu + cx1 * ut * 2 + cx2 * tt));
+		if (tangents) {
+			if (p < 0.001f)
+				out[o + 2] = (float)Math.atan2(cy1 - y1, cx1 - x1);
+			else
+				out[o + 2] = (float)Math.atan2(y - (y1 * uu + cy1 * ut * 2 + cy2 * tt), x - (x1 * uu + cx1 * ut * 2 + cx2 * tt));
+		}
 	}
 
 	public int getOrder () {

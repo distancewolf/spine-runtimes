@@ -39,6 +39,7 @@ package spine.starling {
 
 	public class TwoColorEffect extends MeshEffect {
 		public  static const VERTEX_FORMAT : VertexDataFormat = TwoColorMeshStyle.VERTEX_FORMAT;
+		private static const VECTOR_ONES:Vector.<Number> = Vector.<Number>([1, 1, 1, 1]);
 
 		override protected function createProgram() : Program {
 			// v0 -> tex coords
@@ -54,10 +55,11 @@ package spine.starling {
 			var fragmentShader : String = [
 			tex("ft0", "v0", 0, texture),   	// ft0 = texture2d(texCoords)
 			"mul ft1, ft0, v1",					// ft1 = texColor * light
+			"sub ft3.xyz, ft0.www, fc0.xyz",    // ft3 = texColor.a - 1
 			"sub ft2.xyz, fc0.xyz, ft0.xyz",	// ft2.xyz = (1 - texColor.rgb)
-			"mul ft2.xyz, ft2.xyz, v2.xyz",		// ft2.xyz = (1 - texColor.rgb) * dark.rgb
-			"mul ft2.xyz, ft2.xyz, ft1.www",	// ft2.xyz = (1 - texColor.rgb) * dark.rgb * alpha
-			"add ft2.xyz, ft2.xyz, ft1.xyz",	// ft2.xyz = (1 - texColor.rgb) * dark.rgb * alpha + texColor.rgb * light.rgb
+			"add ft2.xyz, ft2.xyz, ft3.xyz",    // ft2.xyz = ((texColor.a - 1.0) + 1.0 - texColor.rgb)
+			"mul ft2.xyz, ft2.xyz, v2.xyz",		// ft2.xyz = ((texColor.a - 1.0) + 1.0 - texColor.rgb) * dark.rgb			
+			"add ft2.xyz, ft2.xyz, ft1.xyz",	// ft2.xyz = ((texColor.a - 1.0) + 1.0 - texColor.rgb) * dark.rgb + texColor.rgb * light.rgb
 			"mov ft2.w, ft1.w",					// ft2.w = alpha
 			"mov oc, ft2"
 			].join("\n");
@@ -74,7 +76,7 @@ package spine.starling {
 			vertexFormat.setVertexBufferAt(3, vertexBuffer, "color2");
 			
 			// fc0 -> (1, 1, 1, 1) 
-			context.setProgramConstantsFromVector(Context3DProgramType.FRAGMENT, 0, Vector.<Number>([1, 1, 1, 1]));
+			context.setProgramConstantsFromVector(Context3DProgramType.FRAGMENT, 0, VECTOR_ONES);
 		}
 
 		override protected function afterDraw(context : Context3D) : void {

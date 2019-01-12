@@ -65,13 +65,18 @@ package spine.examples {
 			var skeletonData : SkeletonData = json.readSkeletonData(new CoinJson());
 
 			this.x = 400;
-			this.y = 600;
+			this.y = 300;
 
 			skeleton = new SkeletonAnimation(skeletonData);
-			skeleton.state.setAnimationByName(0, "rotate", true);
+			skeleton.state.setAnimationByName(0, "animation", true);
 			skeleton.state.timeScale = 0.5;
 			skeleton.state.update(0.25);
 			skeleton.state.apply(skeleton.skeleton);
+			
+			// enable two color tinting, which breaks batching between this skeleton
+			// and other Starling objects.
+			skeleton.twoColorTint = true;
+			
 			skeleton.skeleton.updateWorldTransform();
 
 			addChild(skeleton);

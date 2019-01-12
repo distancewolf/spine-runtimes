@@ -36,7 +36,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 
 namespace Spine {
-	[Serializable]
 	[DebuggerDisplay("Count={Count}")]
 	public class ExposedList<T> : IEnumerable<T> {
 		public T[] Items;
@@ -83,14 +82,25 @@ namespace Spine {
 			version++;
 		}
 
-		public void GrowIfNeeded (int newCount) {
-			int minimumSize = Count + newCount;
+		public void GrowIfNeeded (int addedCount) {
+			int minimumSize = Count + addedCount;
 			if (minimumSize > Items.Length)
 				Capacity = Math.Max(Math.Max(Capacity * 2, DefaultCapacity), minimumSize);
 		}
 
 		public ExposedList<T> Resize (int newSize) {
-			if (newSize > Items.Length) Array.Resize(ref Items, newSize);
+			int itemsLength = Items.Length;
+			var oldItems = Items;
+			if (newSize > itemsLength) {
+				Array.Resize(ref Items, newSize);
+//				var newItems = new T[newSize];
+//				Array.Copy(oldItems, newItems, Count);
+//				Items = newItems;
+			} else if (newSize < itemsLength) {
+				// Allow nulling of T reference type to allow GC.
+				for (int i = newSize; i < itemsLength; i++)
+					oldItems[i] = default(T);
+			}
 			Count = newSize;
 			return this;
 		}
@@ -551,7 +561,6 @@ namespace Spine {
 
 		#endregion
 
-		[Serializable]
 		public struct Enumerator : IEnumerator<T>, IDisposable {
 			private ExposedList<T> l;
 			private int next;

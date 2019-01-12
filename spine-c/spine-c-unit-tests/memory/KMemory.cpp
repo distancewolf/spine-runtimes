@@ -8,6 +8,8 @@
 
 #include "KMemory.h" // last include
 
+#pragma warning(disable:4996)
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 //	KANJI_DUMP_LEAKED_MEM will print out the memory block that was leaked.
@@ -30,7 +32,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Our memory system is thread-safe, but instead of linking massive libraries,
 // we attempt to use C++11 std::mutex.
-#ifdef USE_CPP11_MUTEX
+#ifdef USE_CPP11_MUTEX_DISABLED
 #include <mutex>
 typedef std::recursive_mutex KSysLock; // rentrant
 struct KAutoLock {

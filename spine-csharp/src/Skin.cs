@@ -63,6 +63,12 @@ namespace Spine {
 			return attachment;
 		}
 
+		/// <summary> Removes the attachment in the skin for the specified slot index and name, if any.</summary>
+		public void RemoveAttachment (int slotIndex, string name) {
+			if (slotIndex < 0) throw new ArgumentOutOfRangeException("slotIndex", "slotIndex must be >= 0");
+			attachments.Remove(new AttachmentKeyTuple(slotIndex, name));
+		}
+
 		/// <summary>Finds the skin keys for a given slot. The results are added to the passed List(names).</summary>
 		/// <param name="slotIndex">The target slotIndex. To find the slot index, use <see cref="Spine.Skeleton.FindSlotIndex"/> or <see cref="Spine.SkeletonData.FindSlotIndex"/>
 		/// <param name="names">Found skin key names will be added to this list.</param>
@@ -114,7 +120,7 @@ namespace Spine {
 			internal static readonly AttachmentKeyTupleComparer Instance = new AttachmentKeyTupleComparer();
 
 			bool IEqualityComparer<AttachmentKeyTuple>.Equals (AttachmentKeyTuple o1, AttachmentKeyTuple o2) {
-				return o1.slotIndex == o2.slotIndex && o1.nameHashCode == o2.nameHashCode && o1.name == o2.name;
+				return o1.slotIndex == o2.slotIndex && o1.nameHashCode == o2.nameHashCode && string.Equals(o1.name, o2.name, StringComparison.Ordinal);
 			}
 
 			int IEqualityComparer<AttachmentKeyTuple>.GetHashCode (AttachmentKeyTuple o) {

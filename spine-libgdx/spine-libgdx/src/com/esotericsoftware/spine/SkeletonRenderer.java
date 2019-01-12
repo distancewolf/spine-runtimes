@@ -30,6 +30,14 @@
 
 package com.esotericsoftware.spine;
 
+import com.esotericsoftware.spine.attachments.Attachment;
+import com.esotericsoftware.spine.attachments.ClippingAttachment;
+import com.esotericsoftware.spine.attachments.MeshAttachment;
+import com.esotericsoftware.spine.attachments.RegionAttachment;
+import com.esotericsoftware.spine.attachments.SkeletonAttachment;
+import com.esotericsoftware.spine.utils.SkeletonClipping;
+import com.esotericsoftware.spine.utils.TwoColorPolygonBatch;
+
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -39,13 +47,6 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.NumberUtils;
 import com.badlogic.gdx.utils.ShortArray;
-import com.esotericsoftware.spine.attachments.Attachment;
-import com.esotericsoftware.spine.attachments.ClippingAttachment;
-import com.esotericsoftware.spine.attachments.MeshAttachment;
-import com.esotericsoftware.spine.attachments.RegionAttachment;
-import com.esotericsoftware.spine.attachments.SkeletonAttachment;
-import com.esotericsoftware.spine.utils.SkeletonClipping;
-import com.esotericsoftware.spine.utils.TwoColorPolygonBatch;
 
 public class SkeletonRenderer {
 	static private final short[] quadTriangles = {0, 1, 2, 2, 3, 0};
@@ -61,11 +62,27 @@ public class SkeletonRenderer {
 	private final Color temp5 = new Color();
 	private final Color temp6 = new Color();
 
+	/** Renders the specified skeleton. If the batch is a PolygonSpriteBatch, {@link #draw(PolygonSpriteBatch, Skeleton)} is
+	 * called. If the batch is a TwoColorPolygonBatch, {@link #draw(TwoColorPolygonBatch, Skeleton)} is called. Otherwise the
+	 * skeleton is rendered without two color tinting and any mesh attachments will throw an exception.
+	 * <p>
+	 * This method may change the batch's {@link Batch#setBlendFunctionSeparate(int, int, int, int) blending function}. The
+	 * previous blend function is not restored, since that could result in unnecessary flushes, depending on what is rendered
+	 * next. */
 	public void draw (Batch batch, Skeleton skeleton) {
+		if (batch instanceof TwoColorPolygonBatch) {
+			draw((TwoColorPolygonBatch)batch, skeleton);
+			return;
+		} else if (batch instanceof PolygonSpriteBatch) {
+			draw((PolygonSpriteBatch)batch, skeleton);
+			return;
+		}
+
 		VertexEffect vertexEffect = this.vertexEffect;
 		if (vertexEffect != null) vertexEffect.begin(skeleton);
 
 		boolean premultipliedAlpha = this.premultipliedAlpha;
+		BlendMode blendMode = null;
 		float[] vertices = this.vertices.items;
 		Color skeletonColor = skeleton.color;
 		float r = skeletonColor.r, g = skeletonColor.g, b = skeletonColor.b, a = skeletonColor.a;
@@ -78,10 +95,22 @@ public class SkeletonRenderer {
 				region.computeWorldVertices(slot.getBone(), vertices, 0, 5);
 				Color color = region.getColor(), slotColor = slot.getColor();
 				float alpha = a * slotColor.a * color.a * 255;
+				float multiplier = premultipliedAlpha ? alpha : 255;
+
+				BlendMode slotBlendMode = slot.data.getBlendMode();
+				if (slotBlendMode != blendMode) {
+					if (slotBlendMode == BlendMode.additive && premultipliedAlpha) {
+						slotBlendMode = BlendMode.normal;
+						alpha = 0;
+					}
+					blendMode = slotBlendMode;
+					batch.setBlendFunction(blendMode.getSource(premultipliedAlpha), blendMode.getDest());
+				}
+
 				float c = NumberUtils.intToFloatColor(((int)alpha << 24) //
-					| ((int)(b * slotColor.b * color.b * alpha) << 16) //
-					| ((int)(g * slotColor.g * color.g * alpha) << 8) //
-					| (int)(r * slotColor.r * color.r * alpha));
+					| ((int)(b * slotColor.b * color.b * multiplier) << 16) //
+					| ((int)(g * slotColor.g * color.g * multiplier) << 8) //
+					| (int)(r * slotColor.r * color.r * multiplier));
 				float[] uvs = region.getUVs();
 				for (int u = 0, v = 2; u < 8; u += 2, v += 5) {
 					vertices[v] = c;
@@ -91,8 +120,6 @@ public class SkeletonRenderer {
 
 				if (vertexEffect != null) applyVertexEffect(vertices, 20, 5, c, 0);
 
-				BlendMode blendMode = slot.data.getBlendMode();
-				batch.setBlendFunction(blendMode.getSource(premultipliedAlpha), blendMode.getDest());
 				batch.draw(region.getRegion().getTexture(), vertices, 0, 20);
 
 			} else if (attachment instanceof ClippingAttachment) {
@@ -100,35 +127,12 @@ public class SkeletonRenderer {
 				continue;
 
 			} else if (attachment instanceof MeshAttachment) {
-				throw new RuntimeException(
-					"SkeletonRenderer#draw(PolygonSpriteBatch, Skeleton) or #draw(TwoColorPolygonBatch, Skeleton) must be used to "
-						+ "render meshes.");
+				throw new RuntimeException(batch.getClass().getSimpleName()
+					+ " cannot render meshes, PolygonSpriteBatch or TwoColorPolygonBatch is required.");
 
 			} else if (attachment instanceof SkeletonAttachment) {
 				Skeleton attachmentSkeleton = ((SkeletonAttachment)attachment).getSkeleton();
-				if (attachmentSkeleton != null) {
-					Bone bone = slot.getBone();
-					Bone rootBone = attachmentSkeleton.getRootBone();
-					float oldScaleX = rootBone.getScaleX();
-					float oldScaleY = rootBone.getScaleY();
-					float oldRotation = rootBone.getRotation();
-					attachmentSkeleton.setPosition(bone.getWorldX(), bone.getWorldY());
-					// rootBone.setScaleX(1 + bone.getWorldScaleX() -
-					// oldScaleX);
-					// rootBone.setScaleY(1 + bone.getWorldScaleY() -
-					// oldScaleY);
-					// Set shear.
-					rootBone.setRotation(oldRotation + bone.getWorldRotationX());
-					attachmentSkeleton.updateWorldTransform();
-
-					draw(batch, attachmentSkeleton);
-
-					attachmentSkeleton.setX(0);
-					attachmentSkeleton.setY(0);
-					rootBone.setScaleX(oldScaleX);
-					rootBone.setScaleY(oldScaleY);
-					rootBone.setRotation(oldRotation);
-				}
+				if (attachmentSkeleton != null) draw(batch, attachmentSkeleton);
 			}
 
 			clipper.clipEnd(slot);
@@ -137,6 +141,11 @@ public class SkeletonRenderer {
 		if (vertexEffect != null) vertexEffect.end();
 	}
 
+	/** Renders the specified skeleton, including meshes, but without two color tinting.
+	 * <p>
+	 * This method may change the batch's {@link Batch#setBlendFunctionSeparate(int, int, int, int) blending function}. The
+	 * previous blend function is not restored, since that could result in unnecessary flushes, depending on what is rendered
+	 * next. */
 	@SuppressWarnings("null")
 	public void draw (PolygonSpriteBatch batch, Skeleton skeleton) {
 		Vector2 tempPos = this.temp;
@@ -189,43 +198,28 @@ public class SkeletonRenderer {
 
 			} else if (attachment instanceof SkeletonAttachment) {
 				Skeleton attachmentSkeleton = ((SkeletonAttachment)attachment).getSkeleton();
-				if (attachmentSkeleton != null) {
-					Bone bone = slot.getBone();
-					Bone rootBone = attachmentSkeleton.getRootBone();
-					float oldScaleX = rootBone.getScaleX();
-					float oldScaleY = rootBone.getScaleY();
-					float oldRotation = rootBone.getRotation();
-					attachmentSkeleton.setPosition(bone.getWorldX(), bone.getWorldY());
-					// rootBone.setScaleX(1 + bone.getWorldScaleX() -
-					// oldScaleX);
-					// rootBone.setScaleY(1 + bone.getWorldScaleY() -
-					// oldScaleY);
-					// Also set shear.
-					rootBone.setRotation(oldRotation + bone.getWorldRotationX());
-					attachmentSkeleton.updateWorldTransform();
-
-					draw(batch, attachmentSkeleton);
-
-					attachmentSkeleton.setPosition(0, 0);
-					rootBone.setScaleX(oldScaleX);
-					rootBone.setScaleY(oldScaleY);
-					rootBone.setRotation(oldRotation);
-				}
+				if (attachmentSkeleton != null) draw(batch, attachmentSkeleton);
 			}
 
 			if (texture != null) {
 				Color slotColor = slot.getColor();
 				float alpha = a * slotColor.a * color.a * 255;
-				float c = NumberUtils.intToFloatColor(((int)alpha << 24) //
-					| ((int)(b * slotColor.b * color.b * alpha) << 16) //
-					| ((int)(g * slotColor.g * color.g * alpha) << 8) //
-					| (int)(r * slotColor.r * color.r * alpha));
+				float multiplier = premultipliedAlpha ? alpha : 255;
 
 				BlendMode slotBlendMode = slot.data.getBlendMode();
 				if (slotBlendMode != blendMode) {
+					if (slotBlendMode == BlendMode.additive && premultipliedAlpha) {
+						slotBlendMode = BlendMode.normal;
+						alpha = 0;
+					}
 					blendMode = slotBlendMode;
 					batch.setBlendFunction(blendMode.getSource(premultipliedAlpha), blendMode.getDest());
 				}
+
+				float c = NumberUtils.intToFloatColor(((int)alpha << 24) //
+					| ((int)(b * slotColor.b * color.b * multiplier) << 16) //
+					| ((int)(g * slotColor.g * color.g * multiplier) << 8) //
+					| (int)(r * slotColor.r * color.r * multiplier));
 
 				if (clipper.isClipping()) {
 					clipper.clipTriangles(vertices, verticesLength, triangles, triangles.length, uvs, c, 0, false);
@@ -269,6 +263,11 @@ public class SkeletonRenderer {
 		if (vertexEffect != null) vertexEffect.end();
 	}
 
+	/** Renders the specified skeleton, including meshes and two color tinting.
+	 * <p>
+	 * This method may change the batch's {@link Batch#setBlendFunctionSeparate(int, int, int, int) blending function}. The
+	 * previous blend function is not restored, since that could result in unnecessary flushes, depending on what is rendered
+	 * next. */
 	@SuppressWarnings("null")
 	public void draw (TwoColorPolygonBatch batch, Skeleton skeleton) {
 		Vector2 tempPos = this.temp;
@@ -281,6 +280,7 @@ public class SkeletonRenderer {
 		if (vertexEffect != null) vertexEffect.begin(skeleton);
 
 		boolean premultipliedAlpha = this.premultipliedAlpha;
+		batch.setPremultipliedAlpha(premultipliedAlpha);
 		BlendMode blendMode = null;
 		int verticesLength = 0;
 		float[] vertices = null, uvs = null;
@@ -321,54 +321,43 @@ public class SkeletonRenderer {
 
 			} else if (attachment instanceof SkeletonAttachment) {
 				Skeleton attachmentSkeleton = ((SkeletonAttachment)attachment).getSkeleton();
-				if (attachmentSkeleton != null) {
-					Bone bone = slot.getBone();
-					Bone rootBone = attachmentSkeleton.getRootBone();
-					float oldScaleX = rootBone.getScaleX();
-					float oldScaleY = rootBone.getScaleY();
-					float oldRotation = rootBone.getRotation();
-					attachmentSkeleton.setPosition(bone.getWorldX(), bone.getWorldY());
-					// rootBone.setScaleX(1 + bone.getWorldScaleX() - oldScaleX);
-					// rootBone.setScaleY(1 + bone.getWorldScaleY() - oldScaleY);
-					// Also set shear.
-					rootBone.setRotation(oldRotation + bone.getWorldRotationX());
-					attachmentSkeleton.updateWorldTransform();
-
-					draw(batch, attachmentSkeleton);
-
-					attachmentSkeleton.setPosition(0, 0);
-					rootBone.setScaleX(oldScaleX);
-					rootBone.setScaleY(oldScaleY);
-					rootBone.setRotation(oldRotation);
-				}
+				if (attachmentSkeleton != null) draw(batch, attachmentSkeleton);
 			}
 
 			if (texture != null) {
 				Color lightColor = slot.getColor();
 				float alpha = a * lightColor.a * color.a * 255;
-				float light = NumberUtils.intToFloatColor(((int)alpha << 24) //
-					| ((int)(b * lightColor.b * color.b * alpha) << 16) //
-					| ((int)(g * lightColor.g * color.g * alpha) << 8) //
-					| (int)(r * lightColor.r * color.r * alpha));
-				Color darkColor = slot.getDarkColor();
-				if (darkColor == null) darkColor = Color.BLACK;
-				float dark = NumberUtils.intToFloatColor( //
-					((int)(b * darkColor.b * color.b * 255) << 16) //
-						| ((int)(g * darkColor.g * color.g * 255) << 8) //
-						| (int)(r * darkColor.r * color.r * 255));
+				float multiplier = premultipliedAlpha ? alpha : 255;
 
 				BlendMode slotBlendMode = slot.data.getBlendMode();
 				if (slotBlendMode != blendMode) {
+					if (slotBlendMode == BlendMode.additive && premultipliedAlpha) {
+						slotBlendMode = BlendMode.normal;
+						alpha = 0;
+					}
 					blendMode = slotBlendMode;
 					batch.setBlendFunction(blendMode.getSource(premultipliedAlpha), blendMode.getDest());
 				}
+
+				float red = r * color.r * multiplier;
+				float green = g * color.g * multiplier;
+				float blue = b * color.b * multiplier;
+				float light = NumberUtils.intToFloatColor(((int)alpha << 24) //
+					| ((int)(blue * lightColor.b) << 16) //
+					| ((int)(green * lightColor.g) << 8) //
+					| (int)(red * lightColor.r));
+				Color darkColor = slot.getDarkColor();
+				float dark = darkColor == null ? 0
+					: NumberUtils.intToFloatColor((int)(blue * darkColor.b) << 16 //
+						| (int)(green * darkColor.g) << 8 //
+						| (int)(red * darkColor.r));
 
 				if (clipper.isClipping()) {
 					clipper.clipTriangles(vertices, verticesLength, triangles, triangles.length, uvs, light, dark, true);
 					FloatArray clippedVertices = clipper.getClippedVertices();
 					ShortArray clippedTriangles = clipper.getClippedTriangles();
 					if (vertexEffect != null) applyVertexEffect(clippedVertices.items, clippedVertices.size, 6, light, dark);
-					batch.draw(texture, clippedVertices.items, 0, clippedVertices.size, clippedTriangles.items, 0,
+					batch.drawTwoColor(texture, clippedVertices.items, 0, clippedVertices.size, clippedTriangles.items, 0,
 						clippedTriangles.size);
 				} else {
 					if (vertexEffect != null) {
@@ -397,7 +386,7 @@ public class SkeletonRenderer {
 							vertices[v + 3] = uvs[u + 1];
 						}
 					}
-					batch.draw(texture, vertices, 0, verticesLength, triangles, 0, triangles.length);
+					batch.drawTwoColor(texture, vertices, 0, verticesLength, triangles, 0, triangles.length);
 				}
 			}
 

@@ -33,8 +33,11 @@
 #include <string.h>
 #include <string>
 #include <stdlib.h>
+#include "Runtime/Core/Public/Misc/MessageDialog.h"
 
 #define LOCTEXT_NAMESPACE "Spine"
+
+using namespace spine;
 
 FName USpineSkeletonDataAsset::GetSkeletonDataFileName () const {
 #if WITH_EDITORONLY_DATA
@@ -83,34 +86,47 @@ void USpineSkeletonDataAsset::Serialize (FArchive& Ar) {
 
 void USpineSkeletonDataAsset::BeginDestroy () {
 	if (this->skeletonData) {
-		spSkeletonData_dispose(this->skeletonData);
+		delete this->skeletonData;
 		this->skeletonData = nullptr;
 	}
 	if (this->animationStateData) {
-		spAnimationStateData_dispose(this->animationStateData);
+		delete this->animationStateData;
 		this->animationStateData = nullptr;
 	}
 	Super::BeginDestroy();
 }
 
-spSkeletonData* USpineSkeletonDataAsset::GetSkeletonData (spAtlas* Atlas, bool ForceReload) {
-	if (!skeletonData || ForceReload) {
+SkeletonData* USpineSkeletonDataAsset::GetSkeletonData (Atlas* Atlas, bool ForceReload) {
+	if (!skeletonData || lastAtlas != Atlas || ForceReload) {
 		if (skeletonData) {
-			spSkeletonData_dispose(skeletonData);
+			delete skeletonData;
 			skeletonData = nullptr;
 		}		
 		int dataLen = rawData.Num();
 		if (skeletonDataFileName.GetPlainNameString().Contains(TEXT(".json"))) {
-			spSkeletonJson* json = spSkeletonJson_create(Atlas);
-			this->skeletonData = spSkeletonJson_readSkeletonData(json, (const char*)rawData.GetData());
-			spSkeletonJson_dispose(json);
+			SkeletonJson* json = new (__FILE__, __LINE__) SkeletonJson(Atlas);
+			this->skeletonData = json->readSkeletonData((const char*)rawData.GetData());
+			if (!skeletonData) {
+#if WITH_EDITORONLY_DATA
+				FMessageDialog::Debugf(FText::FromString(UTF8_TO_TCHAR(json->getError().buffer())));
+#endif
+				UE_LOG(SpineLog, Error, TEXT("Couldn't load skeleton data and atlas: %s"), UTF8_TO_TCHAR(json->getError().buffer()));
+			}
+			delete json;
 		} else {
-			spSkeletonBinary* binary = spSkeletonBinary_create(Atlas);
-			this->skeletonData = spSkeletonBinary_readSkeletonData(binary, (const unsigned char*)rawData.GetData(), (int)rawData.Num());
-			spSkeletonBinary_dispose(binary);
+			SkeletonBinary* binary = new (__FILE__, __LINE__) SkeletonBinary(Atlas);
+			this->skeletonData = binary->readSkeletonData((const unsigned char*)rawData.GetData(), (int)rawData.Num());
+			if (!skeletonData) {
+#if WITH_EDITORONLY_DATA
+				FMessageDialog::Debugf(FText::FromString(UTF8_TO_TCHAR(binary->getError().buffer())));
+#endif
+				UE_LOG(SpineLog, Error, TEXT("Couldn't load skeleton data and atlas: %s"), UTF8_TO_TCHAR(binary->getError().buffer()));
+			}
+			delete binary;
 		}
 		if (animationStateData) {
-			spAnimationStateData_dispose(animationStateData);
+			delete animationStateData;
+			animationStateData = nullptr;
 			GetAnimationStateData(Atlas);
 		}
 		lastAtlas = Atlas;
@@ -118,19 +134,19 @@ spSkeletonData* USpineSkeletonDataAsset::GetSkeletonData (spAtlas* Atlas, bool F
 	return this->skeletonData;
 }
 
-spAnimationStateData* USpineSkeletonDataAsset::GetAnimationStateData(spAtlas* atlas) {
+AnimationStateData* USpineSkeletonDataAsset::GetAnimationStateData(Atlas* atlas) {
 	if (!animationStateData) {
-		spSkeletonData* skeletonData = GetSkeletonData(atlas, false);
-		animationStateData = spAnimationStateData_create(skeletonData);
+		SkeletonData* skeletonData = GetSkeletonData(atlas, false);
+		animationStateData = new (__FILE__, __LINE__) AnimationStateData(skeletonData);
 	}
 	for (auto& data : MixData) {
 		if (!data.From.IsEmpty() && !data.To.IsEmpty()) {
 			const char* fromChar = TCHAR_TO_UTF8(*data.From);
 			const char* toChar = TCHAR_TO_UTF8(*data.To);
-			spAnimationStateData_setMixByName(animationStateData, fromChar, toChar, data.Mix);
+			animationStateData->setMix(fromChar, toChar, data.Mix);
 		}
 	}
-	animationStateData->defaultMix = DefaultMix;
+	animationStateData->setDefaultMix(DefaultMix);
 	return this->animationStateData;
 }
 

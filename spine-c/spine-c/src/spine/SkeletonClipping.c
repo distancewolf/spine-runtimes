@@ -161,21 +161,33 @@ int /*boolean*/ _clip(spSkeletonClipping* self, float x1, float y1, float x2, fl
 			int side2 = deltaX * (inputY2 - edgeY2) - deltaY * (inputX2 - edgeX2) > 0;
 			if (deltaX * (inputY - edgeY2) - deltaY * (inputX - edgeX2) > 0) {
 				float c0, c2;
-				float ua;
+				float s, ua;
 				if (side2) {
 					spFloatArray_add(output, inputX2);
 					spFloatArray_add(output, inputY2);
 					continue;
 				}
 				c0 = inputY2 - inputY, c2 = inputX2 - inputX;
-				ua = (c2 * (edgeY - inputY) - c0 * (edgeX - inputX)) / (c0 * (edgeX2 - edgeX) - c2 * (edgeY2 - edgeY));
-				spFloatArray_add(output, edgeX + (edgeX2 - edgeX) * ua);
-				spFloatArray_add(output, edgeY + (edgeY2 - edgeY) * ua);
+				s = c0 * (edgeX2 - edgeX) - c2 * (edgeY2 - edgeY);
+				if (ABS(s) > 0.000001f) {
+					ua = (c2 * (edgeY - inputY) - c0 * (edgeX - inputX)) / s;
+					spFloatArray_add(output, edgeX + (edgeX2 - edgeX) * ua);
+					spFloatArray_add(output, edgeY + (edgeY2 - edgeY) * ua);
+				} else {
+					spFloatArray_add(output, edgeX);
+					spFloatArray_add(output, edgeY);
+				}
 			} else if (side2) {
 				float c0 = inputY2 - inputY, c2 = inputX2 - inputX;
-				float ua = (c2 * (edgeY - inputY) - c0 * (edgeX - inputX)) / (c0 * (edgeX2 - edgeX) - c2 * (edgeY2 - edgeY));
-				spFloatArray_add(output, edgeX + (edgeX2 - edgeX) * ua);
-				spFloatArray_add(output, edgeY + (edgeY2 - edgeY) * ua);
+				float s = c0 * (edgeX2 - edgeX) - c2 * (edgeY2 - edgeY);
+				if (ABS(s) > 0.000001f) {
+					float ua = (c2 * (edgeY - inputY) - c0 * (edgeX - inputX)) / s;
+					spFloatArray_add(output, edgeX + (edgeX2 - edgeX) * ua);
+					spFloatArray_add(output, edgeY + (edgeY2 - edgeY) * ua);
+				} else {
+					spFloatArray_add(output, edgeX);
+					spFloatArray_add(output, edgeY);
+				}
 				spFloatArray_add(output, inputX2);
 				spFloatArray_add(output, inputY2);
 			}
@@ -220,7 +232,7 @@ void spSkeletonClipping_clipTriangles(spSkeletonClipping* self, float* vertices,
 	spFloatArray_clear(clippedUVs);
 	spUnsignedShortArray_clear(clippedTriangles);
 	i = 0;
-	outer:
+	continue_outer:
 	for (; i < trianglesLength; i += 3) {
 		int p;
 		int vertexOffset = triangles[i] * stride;
@@ -306,8 +318,9 @@ void spSkeletonClipping_clipTriangles(spSkeletonClipping* self, float* vertices,
 				clippedTrianglesItems[s + 2] = (unsigned short)(index + 2);
 				index += 3;
 				i += 3;
-				goto outer;
+				goto continue_outer;
 			}
 		}
 	}
+	UNUSED(verticesLength);
 }

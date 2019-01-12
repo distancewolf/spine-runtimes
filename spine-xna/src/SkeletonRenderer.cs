@@ -45,6 +45,7 @@ namespace Spine {
 		SkeletonClipping clipper = new SkeletonClipping();	
 		GraphicsDevice device;
 		MeshBatcher batcher;
+		public MeshBatcher Batcher { get { return batcher; } }
 		RasterizerState rasterizerState;
 		float[] vertices = new float[8];
 		int[] quadTriangles = { 0, 1, 2, 2, 3, 0 };
@@ -52,6 +53,7 @@ namespace Spine {
 
 		Effect effect;
 		public Effect Effect { get { return effect; } set { effect = value; } }
+		public IVertexEffect VertexEffect { get; set; }
 
 		private bool premultipliedAlpha;
 		public bool PremultipliedAlpha { get { return premultipliedAlpha; } set { premultipliedAlpha = value; } }
@@ -93,6 +95,8 @@ namespace Spine {
 			var drawOrderItems = skeleton.DrawOrder.Items;
 			float skeletonR = skeleton.R, skeletonG = skeleton.G, skeletonB = skeleton.B, skeletonA = skeleton.A;
 			Color color = new Color();
+
+			if (VertexEffect != null) VertexEffect.Begin(skeleton);
 
 			for (int i = 0, n = drawOrder.Count; i < n; i++) {
 				Slot slot = drawOrderItems[i];
@@ -163,11 +167,16 @@ namespace Spine {
 
 				Color darkColor = new Color();
 				if (slot.HasSecondColor) {
-					darkColor = new Color(slot.R2, slot.G2, slot.B2);
+					if (premultipliedAlpha) {
+						darkColor = new Color(slot.R2 * a, slot.G2 * a, slot.B2 * a);
+					} else {
+						darkColor = new Color(slot.R2 * a, slot.G2 * a, slot.B2 * a);
+					}
 				}
+				darkColor.A = premultipliedAlpha ? (byte)255 : (byte)0;
 
 				// clip
-				if (clipper.IsClipping()) {
+				if (clipper.IsClipping) {
 					clipper.ClipTriangles(vertices, verticesCount << 1, indices, indicesCount, uvs);
 					vertices = clipper.ClippedVertices.Items;
 					verticesCount = clipper.ClippedVertices.Count >> 1;
@@ -194,11 +203,13 @@ namespace Spine {
 					itemVertices[ii].Position.Z = 0;
 					itemVertices[ii].TextureCoordinate.X = uvs[v];
 					itemVertices[ii].TextureCoordinate.Y = uvs[v + 1];
+					if (VertexEffect != null) VertexEffect.Transform(ref itemVertices[ii]);
 				}
 
 				clipper.ClipEnd(slot);
 			}
 			clipper.ClipEnd();
+			if (VertexEffect != null) VertexEffect.End();
 		}
 	}
 }
