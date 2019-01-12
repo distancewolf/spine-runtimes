@@ -32,7 +32,6 @@
 #include "Engine.h"
 #include "spine/spine.h"
 #include <stdlib.h>
-
 #define LOCTEXT_NAMESPACE "Spine"
 
 USpineSkeletonRendererComponent::USpineSkeletonRendererComponent (const FObjectInitializer& ObjectInitializer) 
@@ -71,9 +70,37 @@ void USpineSkeletonRendererComponent::BeginPlay () {
 
 void USpineSkeletonRendererComponent::TickComponent (float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	
 	AActor* owner = GetOwner();
 	if (owner) {
+
+		if (GetWorld()->GetNetMode() == ENetMode::NM_DedicatedServer)
+		{
+			PrimaryComponentTick.SetTickFunctionEnable(false);
+			return;
+		}
+
+		//allow a couple ticks regardless of location, then ensure that the thing is close to the camera to tick following that
+		if (m_tickCount > 2)
+		{
+			APlayerController *playerController = GetWorld()->GetFirstPlayerController();
+			if (playerController != nullptr)
+			{
+				const float camHalfWidth = playerController->PlayerCameraManager->GetOrthoWidth() * 1.1 * 0.5f;// 1056.f;  //((1920.f * 1.1f) * 0.5f).  playerController->PlayerCameraManager doesn't know the ortho width. Also, make the cam width a bit bigger, otherwise the player might notice a "jolt" into life for the animation
+				const float camHalfHeight = camHalfWidth; //since the playerController->PlayerCameraManager doesn't seem to have an accurate aspect ratio, just use 1:1 as the aspect ratio. its just spine animations...
+				const FVector camLocation = playerController->PlayerCameraManager->GetCameraLocation();
+
+				if ((camLocation.X + camHalfWidth) < (Bounds.Origin.X - Bounds.SphereRadius) ||
+					(camLocation.X - camHalfWidth) > (Bounds.Origin.X + Bounds.SphereRadius) ||
+					(camLocation.Z + camHalfHeight) < (Bounds.Origin.Z - Bounds.SphereRadius) ||
+					(camLocation.Z - camHalfHeight) > (Bounds.Origin.Z + Bounds.SphereRadius))
+				{
+					//**** not colliding, thus not on screen
+					return;
+				}
+			}
+		}
+		m_tickCount++;
+
 		UClass* skeletonClass = USpineSkeletonComponent::StaticClass();
 		USpineSkeletonComponent* skeleton = Cast<USpineSkeletonComponent>(owner->GetComponentByClass(skeletonClass));
 		
@@ -161,13 +188,68 @@ void USpineSkeletonRendererComponent::TickComponent (float DeltaTime, ELevelTick
 					currPage = currPage->next;
 				}
 			}
-			UpdateMesh(skeleton->GetSkeleton());
+			//-------------------
+			//jake added hack
+			if (!m_initialized)
+			{
+				UpdateMeshInitial(skeleton->GetSkeleton());
+				if (m_previousVertCount > 0)
+				{
+					m_initialized = true;
+				}
+			}
+			else
+			{
+				UpdateMesh(skeleton->GetSkeleton());
+			}
+			//-------------------
 		} else {
 			ClearAllMeshSections();
 		}
 	}
 }
 
+void USpineSkeletonRendererComponent::FlushUpdate(int &Idx, TArray<FRuntimeMeshVertexTripleUV> &verts, UMaterialInstanceDynamic* Material) {
+	if (verts.Num() == 0) return;
+	SetMaterial(Idx, Material);
+
+	/*TArray<FRuntimeMeshVertexTripleUV> verts;
+	for (int32 i = 0; i < Vertices.Num(); i++) {
+		verts.Add(FRuntimeMeshVertexTripleUV(Vertices[i], FVector(), FVector(), Colors[i], Uvs[i], FVector2D(Colors2[i].X, Colors2[i].Y), FVector2D(Colors2[i].Z, 0)));
+	}
+*/
+	
+	UpdateMeshSection(Idx, verts);
+
+
+	// CreateMeshSection(Idx, Vertices, Indices, TArray<FVector>(), Uvs, darkRG, Colors, TArray<FRuntimeMeshTangent>(), false);
+	/*Vertices.SetNum(0);
+	Indices.SetNum(0);
+	Uvs.SetNum(0);
+	Colors.SetNum(0);
+	Colors2.SetNum(0);*/
+	//Idx++;
+}
+
+void USpineSkeletonRendererComponent::FlushMoreEfficient(int &Idx, TArray<FRuntimeMeshVertexTripleUV> &verts, TArray<int32> &Indices, UMaterialInstanceDynamic* Material) {
+	if (verts.Num() == 0) return;
+	SetMaterial(Idx, Material);
+
+	/*TArray<FRuntimeMeshVertexTripleUV> verts;
+	for (int32 i = 0; i < Vertices.Num(); i++) {
+		verts.Add(FRuntimeMeshVertexTripleUV(Vertices[i], FVector(), FVector(), Colors[i], Uvs[i], FVector2D(Colors2[i].X, Colors2[i].Y), FVector2D(Colors2[i].Z, 0)));
+	}*/
+
+	CreateMeshSection(Idx, verts, Indices);
+
+	// CreateMeshSection(Idx, Vertices, Indices, TArray<FVector>(), Uvs, darkRG, Colors, TArray<FRuntimeMeshTangent>(), false);
+	//Vertices.SetNum(0);
+	Indices.SetNum(0);
+	//Uvs.SetNum(0);
+	//Colors.SetNum(0);
+	//Colors2.SetNum(0);
+	Idx++;
+}
 
 void USpineSkeletonRendererComponent::Flush (int &Idx, TArray<FVector> &Vertices, TArray<int32> &Indices, TArray<FVector2D> &Uvs, TArray<FColor> &Colors, TArray<FVector>& Colors2, UMaterialInstanceDynamic* Material) {
 	if (Vertices.Num() == 0) return;
@@ -177,7 +259,7 @@ void USpineSkeletonRendererComponent::Flush (int &Idx, TArray<FVector> &Vertices
 	for (int32 i = 0; i < Vertices.Num(); i++) {
 		verts.Add(FRuntimeMeshVertexTripleUV(Vertices[i], FVector(), FVector(), Colors[i], Uvs[i], FVector2D(Colors2[i].X, Colors2[i].Y), FVector2D(Colors2[i].Z, 0)));
 	}
-
+	
 	CreateMeshSection(Idx, verts, Indices);
 
 	// CreateMeshSection(Idx, Vertices, Indices, TArray<FVector>(), Uvs, darkRG, Colors, TArray<FRuntimeMeshTangent>(), false);
@@ -189,21 +271,42 @@ void USpineSkeletonRendererComponent::Flush (int &Idx, TArray<FVector> &Vertices
 	Idx++;
 }
 
-void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
-	TArray<FVector> vertices;
+void USpineSkeletonRendererComponent::UpdateMeshInitial(spSkeleton* Skeleton) {
+	int currentIndex = 0;
+
+	TArray<FRuntimeMeshVertexTripleUV> verts;
+	//this->BeginMeshSectionUpdate((0, verts);
+
+	/*TArray<FVector> vertices;*/
 	TArray<int32> indices;
-	TArray<FVector2D> uvs;
+	/*TArray<FVector2D> uvs;
 	TArray<FColor> colors;
-	TArray<FVector> darkColors;
-	
+	TArray<FVector> darkColors;*/
+
 	int idx = 0;
 	int meshSection = 0;
-	UMaterialInstanceDynamic* lastMaterial = nullptr;
+	//UMaterialInstanceDynamic* lastMaterial = nullptr;
 
-	ClearAllMeshSections();
+	//-----------------
+	//-----------------
+	//-----------------
+	//jake hack: don't recreate the mesh so damn much!
+	//-----------------
+	//-----------------
+	//-----------------
+
+	//if (!m_hasCreatedMesh)
+	//{
+	//	ClearAllMeshSections(); //
+	//}
+
+	//-----------------
+	//-----------------
+	//-----------------
 
 	float depthOffset = 0;
 	unsigned short quadIndices[] = { 0, 1, 2, 0, 2, 3 };
+
 
 	for (int i = 0; i < Skeleton->slotsCount; ++i) {
 		float* attachmentVertices = worldVertices->items;
@@ -219,7 +322,7 @@ void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
 		spAttachment* attachment = slot->attachment;
 		if (!attachment) continue;
 		if (attachment->type != SP_ATTACHMENT_REGION && attachment->type != SP_ATTACHMENT_MESH && attachment->type != SP_ATTACHMENT_CLIPPING) continue;
-		
+
 		if (attachment->type == SP_ATTACHMENT_REGION) {
 			spRegionAttachment* regionAttachment = (spRegionAttachment*)attachment;
 			spColor_setFromColor(&attachmentColor, &regionAttachment->color);
@@ -229,17 +332,19 @@ void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
 			attachmentUvs = regionAttachment->uvs;
 			numVertices = 4;
 			numIndices = 6;
-		} else if (attachment->type == SP_ATTACHMENT_MESH) {
+		}
+		else if (attachment->type == SP_ATTACHMENT_MESH) {
 			spMeshAttachment* mesh = (spMeshAttachment*)attachment;
 			spColor_setFromColor(&attachmentColor, &mesh->color);
-			attachmentAtlasRegion = (spAtlasRegion*)mesh->rendererObject;			
+			attachmentAtlasRegion = (spAtlasRegion*)mesh->rendererObject;
 			if (mesh->super.worldVerticesLength > worldVertices->size) spFloatArray_setSize(worldVertices, mesh->super.worldVerticesLength);
 			spVertexAttachment_computeWorldVertices(&mesh->super, slot, 0, mesh->super.worldVerticesLength, attachmentVertices, 0, 2);
 			attachmentIndices = mesh->triangles;
 			attachmentUvs = mesh->uvs;
 			numVertices = mesh->super.worldVerticesLength >> 1;
 			numIndices = mesh->trianglesCount;
-		} else /* clipping */ {
+		}
+		else /* clipping */ {
 			spClippingAttachment* clip = (spClippingAttachment*)slot->attachment;
 			spSkeletonClipping_clipStart(clipper, slot, clip);
 			continue;
@@ -282,7 +387,7 @@ void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
 		}
 
 		if (lastMaterial != material) {
-			Flush(meshSection, vertices, indices, uvs, colors, darkColors, lastMaterial);
+			//Flush(meshSection, vertices, indices, uvs, colors, darkColors, lastMaterial);
 			lastMaterial = material;
 			idx = 0;
 		}
@@ -296,13 +401,18 @@ void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
 
 		float dr = slot->darkColor ? slot->darkColor->r : 0.0f;
 		float dg = slot->darkColor ? slot->darkColor->g : 0.0f;
-		float db = slot->darkColor ? slot->darkColor->b : 0.0f;		
+		float db = slot->darkColor ? slot->darkColor->b : 0.0f;
 
 		for (int j = 0; j < numVertices << 1; j += 2) {
-			colors.Add(FColor(r, g, b, a));
+			/*colors.Add(FColor(r, g, b, a));
 			darkColors.Add(FVector(dr, dg, db));
 			vertices.Add(FVector(attachmentVertices[j], depthOffset, attachmentVertices[j + 1]));
-			uvs.Add(FVector2D(attachmentUvs[j], attachmentUvs[j + 1]));
+			uvs.Add(FVector2D(attachmentUvs[j], attachmentUvs[j + 1]));*/
+
+			verts.Add(FRuntimeMeshVertexTripleUV(FVector(attachmentVertices[j], depthOffset, attachmentVertices[j + 1]), FVector(), FVector(),
+				FColor(r, g, b, a),
+				FVector2D(attachmentUvs[j], attachmentUvs[j + 1]),
+				FVector2D(dr, dg), FVector2D(db, 0)));
 		}
 
 		for (int j = 0; j < numIndices; j++) {
@@ -312,10 +422,214 @@ void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
 		idx += numVertices;
 		depthOffset += this->DepthOffset;
 
-		spSkeletonClipping_clipEnd(clipper, slot);			
+		spSkeletonClipping_clipEnd(clipper, slot);
 	}
-	
-	Flush(meshSection, vertices, indices, uvs, colors, darkColors, lastMaterial);
+
+	if (verts.Num() > 0)
+	{
+		if (verts.Num() != m_previousVertCount)
+		{
+			m_previousVertCount = verts.Num();
+			ClearAllMeshSections();
+			FlushMoreEfficient(meshSection, verts, indices, lastMaterial);
+		}
+		else
+		{
+			FlushUpdate(meshSection, verts, lastMaterial);
+		}
+	}
+
+	spSkeletonClipping_clipEnd2(clipper);
+}
+
+
+void USpineSkeletonRendererComponent::UpdateMesh(spSkeleton* Skeleton) {
+
+	//-----------------
+	//-----------------
+	//-----------------
+	//jake hack: don't recreate the mesh so damn much!
+	//-----------------
+	//-----------------
+	//-----------------
+
+	TArray<FRuntimeMeshVertexTripleUV> *verts;
+	TArray<int32> *indices;
+	BeginMeshSectionUpdate(0, verts, indices);
+
+	int currentVerticesIndex = -1;
+	int currentIndicesIndex = -1;
+
+	/*TArray<FVector> vertices;*/
+	//TArray<int32> indices;
+	/*TArray<FVector2D> uvs;
+	TArray<FColor> colors;
+	TArray<FVector> darkColors;*/
+
+	int idx = 0;
+	int meshSection = 0;
+	//UMaterialInstanceDynamic* lastMaterial = nullptr;
+
+
+	//-----------------
+	//-----------------
+	//-----------------
+
+	float depthOffset = 0;
+	unsigned short quadIndices[] = { 0, 1, 2, 0, 2, 3 };
+
+
+	for (int i = 0; i < Skeleton->slotsCount; ++i) {
+		float* attachmentVertices = worldVertices->items;
+		unsigned short* attachmentIndices = nullptr;
+		int numVertices;
+		int numIndices;
+		spAtlasRegion* attachmentAtlasRegion = nullptr;
+		spColor attachmentColor;
+		spColor_setFromFloats(&attachmentColor, 1, 1, 1, 1);
+		float* attachmentUvs = nullptr;
+
+		spSlot* slot = Skeleton->drawOrder[i];
+		spAttachment* attachment = slot->attachment;
+		if (!attachment) continue;
+		if (attachment->type != SP_ATTACHMENT_REGION && attachment->type != SP_ATTACHMENT_MESH && attachment->type != SP_ATTACHMENT_CLIPPING) continue;
+
+		if (attachment->type == SP_ATTACHMENT_REGION) {
+			spRegionAttachment* regionAttachment = (spRegionAttachment*)attachment;
+			spColor_setFromColor(&attachmentColor, &regionAttachment->color);
+			attachmentAtlasRegion = (spAtlasRegion*)regionAttachment->rendererObject;
+			spRegionAttachment_computeWorldVertices(regionAttachment, slot->bone, attachmentVertices, 0, 2);
+			attachmentIndices = quadIndices;
+			attachmentUvs = regionAttachment->uvs;
+			numVertices = 4;
+			numIndices = 6;
+		}
+		else if (attachment->type == SP_ATTACHMENT_MESH) {
+			spMeshAttachment* mesh = (spMeshAttachment*)attachment;
+			spColor_setFromColor(&attachmentColor, &mesh->color);
+			attachmentAtlasRegion = (spAtlasRegion*)mesh->rendererObject;
+			if (mesh->super.worldVerticesLength > worldVertices->size) spFloatArray_setSize(worldVertices, mesh->super.worldVerticesLength);
+			spVertexAttachment_computeWorldVertices(&mesh->super, slot, 0, mesh->super.worldVerticesLength, attachmentVertices, 0, 2);
+			attachmentIndices = mesh->triangles;
+			attachmentUvs = mesh->uvs;
+			numVertices = mesh->super.worldVerticesLength >> 1;
+			numIndices = mesh->trianglesCount;
+		}
+		else /* clipping */ {
+			spClippingAttachment* clip = (spClippingAttachment*)slot->attachment;
+			spSkeletonClipping_clipStart(clipper, slot, clip);
+			continue;
+		}
+
+		// if the user switches the atlas data while not having switched
+		// to the correct skeleton data yet, we won't find any regions.
+		// ignore regions for which we can't find a material
+		UMaterialInstanceDynamic* material = nullptr;
+		switch (slot->data->blendMode) {
+		case SP_BLEND_MODE_NORMAL:
+			if (!pageToNormalBlendMaterial.Contains(attachmentAtlasRegion->page)) continue;
+			material = pageToNormalBlendMaterial[attachmentAtlasRegion->page];
+			break;
+		case SP_BLEND_MODE_ADDITIVE:
+			if (!pageToAdditiveBlendMaterial.Contains(attachmentAtlasRegion->page)) continue;
+			material = pageToAdditiveBlendMaterial[attachmentAtlasRegion->page];
+			break;
+		case SP_BLEND_MODE_MULTIPLY:
+			if (!pageToMultiplyBlendMaterial.Contains(attachmentAtlasRegion->page)) continue;
+			material = pageToMultiplyBlendMaterial[attachmentAtlasRegion->page];
+			break;
+		case SP_BLEND_MODE_SCREEN:
+			if (!pageToScreenBlendMaterial.Contains(attachmentAtlasRegion->page)) continue;
+			material = pageToScreenBlendMaterial[attachmentAtlasRegion->page];
+			break;
+		default:
+			if (!pageToNormalBlendMaterial.Contains(attachmentAtlasRegion->page)) continue;
+			material = pageToNormalBlendMaterial[attachmentAtlasRegion->page];
+		}
+
+		if (spSkeletonClipping_isClipping(clipper)) {
+			spSkeletonClipping_clipTriangles(clipper, attachmentVertices, numVertices << 1, attachmentIndices, numIndices, attachmentUvs, 2);
+			attachmentVertices = clipper->clippedVertices->items;
+			numVertices = clipper->clippedVertices->size >> 1;
+			attachmentIndices = clipper->clippedTriangles->items;
+			numIndices = clipper->clippedTriangles->size;
+			attachmentUvs = clipper->clippedUVs->items;
+			if (clipper->clippedTriangles->size == 0) continue;
+		}
+
+		if (lastMaterial != material) {
+			//Flush(meshSection, vertices, indices, uvs, colors, darkColors, lastMaterial);
+			lastMaterial = material;
+			idx = 0;
+		}
+
+		SetMaterial(meshSection, material);
+
+		uint8 r = static_cast<uint8>(Skeleton->color.r * slot->color.r * attachmentColor.r * 255);
+		uint8 g = static_cast<uint8>(Skeleton->color.g * slot->color.g * attachmentColor.g * 255);
+		uint8 b = static_cast<uint8>(Skeleton->color.b * slot->color.b * attachmentColor.b * 255);
+		uint8 a = static_cast<uint8>(Skeleton->color.a * slot->color.a * attachmentColor.a * 255);
+
+		float dr = slot->darkColor ? slot->darkColor->r : 0.0f;
+		float dg = slot->darkColor ? slot->darkColor->g : 0.0f;
+		float db = slot->darkColor ? slot->darkColor->b : 0.0f;
+
+		for (int j = 0; j < numVertices << 1; j += 2) {
+			/*colors.Add(FColor(r, g, b, a));
+			darkColors.Add(FVector(dr, dg, db));
+			vertices.Add(FVector(attachmentVertices[j], depthOffset, attachmentVertices[j + 1]));
+			uvs.Add(FVector2D(attachmentUvs[j], attachmentUvs[j + 1]));*/
+			currentVerticesIndex++;
+			if (verts->Num() > currentVerticesIndex)
+			{
+				(*verts)[currentVerticesIndex].Position = FVector(attachmentVertices[j], depthOffset, attachmentVertices[j + 1]);
+				(*verts)[currentVerticesIndex].Color = FColor(r, g, b, a);
+				(*verts)[currentVerticesIndex].UV0 = FVector2D(attachmentUvs[j], attachmentUvs[j + 1]);
+				(*verts)[currentVerticesIndex].UV1 = FVector2D(dr, dg);
+				(*verts)[currentVerticesIndex].UV2 = FVector2D(db, 0);
+			}
+			else
+			{
+				verts->Add(FRuntimeMeshVertexTripleUV(FVector(attachmentVertices[j], depthOffset, attachmentVertices[j + 1]), FVector(), FVector(),
+					FColor(r, g, b, a),
+					FVector2D(attachmentUvs[j], attachmentUvs[j + 1]),
+					FVector2D(dr, dg), FVector2D(db, 0)));
+			}
+		}
+
+		for (int j = 0; j < numIndices; j++) {
+			currentIndicesIndex++;
+			if (indices->Num() > currentIndicesIndex)
+			{
+				(*indices)[currentIndicesIndex] = idx + attachmentIndices[j];
+			}
+			else
+			{
+				indices->Add(idx + attachmentIndices[j]);
+			}
+		}
+
+		idx += numVertices;
+		depthOffset += this->DepthOffset;
+
+		spSkeletonClipping_clipEnd(clipper, slot);
+	}
+
+	if (currentVerticesIndex < verts->Num()-1)
+	{
+		int countToRemove = (verts->Num()-1) - currentVerticesIndex;
+		verts->RemoveAt(currentVerticesIndex+1, countToRemove);
+	}
+	if (currentIndicesIndex < indices->Num() - 1)
+	{
+		int countToRemove = (indices->Num() - 1) - currentIndicesIndex;
+		indices->RemoveAt(currentIndicesIndex+1, countToRemove);
+
+	}
+
+	this->EndMeshSectionUpdate(0, ERuntimeMeshBuffer::Vertices | ERuntimeMeshBuffer::Triangles);
+
+
 	spSkeletonClipping_clipEnd2(clipper);
 }
 

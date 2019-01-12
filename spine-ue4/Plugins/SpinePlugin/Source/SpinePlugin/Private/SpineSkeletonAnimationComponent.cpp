@@ -40,13 +40,20 @@ void UTrackEntry::SetTrackEntry(spTrackEntry* entry) {
 void callback(spAnimationState* state, spEventType type, spTrackEntry* entry, spEvent* event) {
 	USpineSkeletonAnimationComponent* component = (USpineSkeletonAnimationComponent*)state->rendererObject;
 		
-	if (entry->rendererObject) {			
+	if (entry->rendererObject) {
 		UTrackEntry* uEntry = (UTrackEntry*)entry->rendererObject;
-		if (type == SP_ANIMATION_START) {
+		//Jakes HACK to fix the Spine's crash. WTF did I pay for here. Never again!
+		/*UTrackEntry* uEntry = Cast<UTrackEntry>((UObject*)entry->rendererObject);
+		if (uEntry == nullptr)
+		{
+			return;
+		}*/
+
+		if (type == SP_ANIMATION_START && component->m_callDelegateEvents) {
 			component->AnimationStart.Broadcast(uEntry);
 			uEntry->AnimationStart.Broadcast(uEntry);
 		}
-		else if (type == SP_ANIMATION_INTERRUPT) {
+		else if (type == SP_ANIMATION_INTERRUPT && component->m_callDelegateEvents) {
 			component->AnimationInterrupt.Broadcast(uEntry);
 			uEntry->AnimationInterrupt.Broadcast(uEntry);
 		} else if (type == SP_ANIMATION_EVENT) {
@@ -55,17 +62,20 @@ void callback(spAnimationState* state, spEventType type, spTrackEntry* entry, sp
 			component->AnimationEvent.Broadcast(uEntry, evt);
 			uEntry->AnimationEvent.Broadcast(uEntry, evt);
 		}
-		else if (type == SP_ANIMATION_COMPLETE) {
+		else if (type == SP_ANIMATION_COMPLETE && component->m_callDelegateEvents) {
 			component->AnimationComplete.Broadcast(uEntry);
 			uEntry->AnimationComplete.Broadcast(uEntry);
 		}
-		else if (type == SP_ANIMATION_END) {
+		else if (type == SP_ANIMATION_END && component->m_callDelegateEvents) {
 			component->AnimationEnd.Broadcast(uEntry);
 			uEntry->AnimationEnd.Broadcast(uEntry);
 		}
 		else if (type == SP_ANIMATION_DISPOSE) {
-			component->AnimationDispose.Broadcast(uEntry);
-			uEntry->AnimationDispose.Broadcast(uEntry);
+			if (component->m_callDelegateEvents)
+			{
+				component->AnimationDispose.Broadcast(uEntry);
+				uEntry->AnimationDispose.Broadcast(uEntry);
+			}
 			uEntry->SetTrackEntry(nullptr);
 			component->GCTrackEntry(uEntry);
 		}
@@ -76,6 +86,7 @@ USpineSkeletonAnimationComponent::USpineSkeletonAnimationComponent () {
 	PrimaryComponentTick.bCanEverTick = true;
 	bTickInEditor = true;
 	bAutoActivate = true;
+	m_callDelegateEvents = false;
 }
 
 void USpineSkeletonAnimationComponent::BeginPlay() {

@@ -69,9 +69,16 @@ public:
 	FLinearColor Color = FLinearColor(1, 1, 1, 1);
 
 	virtual void FinishDestroy() override;
-	
+	bool m_initialized = false; //jake added hack
+	int m_tickCount = 0;
 protected:
-	void UpdateMesh (spSkeleton* Skeleton);
+	void UpdateMesh(spSkeleton* Skeleton);
+	void UpdateMeshInitial(spSkeleton* Skeleton);
+	//jakes hack
+	//void FlushUpdate(int &Idx, TArray<FVector> &Vertices, TArray<int32> &Indices, TArray<FVector2D> &Uvs, TArray<FColor> &Colors, TArray<FVector> &Colors2, UMaterialInstanceDynamic* Material);
+	void FlushUpdate(int &Idx, TArray<FRuntimeMeshVertexTripleUV> &verts, UMaterialInstanceDynamic* Material);
+	//jakes hack
+	void FlushMoreEfficient(int &Idx, TArray<FRuntimeMeshVertexTripleUV> &verts, TArray<int32> &Indices, UMaterialInstanceDynamic* Material);
 
 	void Flush (int &Idx, TArray<FVector> &Vertices, TArray<int32> &Indices, TArray<FVector2D> &Uvs, TArray<FColor> &Colors, TArray<FVector> &Colors2, UMaterialInstanceDynamic* Material);
 	
@@ -94,4 +101,11 @@ protected:
 
 	spFloatArray* worldVertices;
 	spSkeletonClipping* clipper;
+
+private:
+	
+	UMaterialInstanceDynamic* lastMaterial = nullptr; //jake added hack
+	int m_previousVertCount = 0; //jake added hack
+	
+
 };

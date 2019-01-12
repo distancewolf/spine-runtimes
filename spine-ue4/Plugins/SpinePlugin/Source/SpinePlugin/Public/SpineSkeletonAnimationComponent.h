@@ -243,6 +243,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Components|Spine|Animation")
 	void ClearTrack (int trackIndex);
 	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components|Spine|Animation")
+	bool m_callDelegateEvents; //JAKES HACK to solve crash where spine is not managing its pointers to ue4 objects safely. The UEntry object is getting destroyed before in SpineSkeletonAnimatioNComponent.cpp->"void callback". If this doesn't solve it immediately, I'll have to fix the way they manage memory.
+
 	UPROPERTY(BlueprintAssignable, Category="Components|Spine|Animation")
 	FSpineAnimationStartDelegate AnimationStart;
 
@@ -264,9 +267,11 @@ public:
 	// used in C event callback. Needs to be public as we can't call
 	// protected methods from plain old C function.
 	void GCTrackEntry(UTrackEntry* entry) { trackEntries.Remove(entry); }
+
+	virtual void InternalTick(float DeltaTime, bool CallDelegates = true) override;
 protected:
 	virtual void CheckState () override;
-	virtual void InternalTick(float DeltaTime, bool CallDelegates = true) override;
+	
 	virtual void DisposeState () override;
 	
 	spAnimationState* state;
